@@ -14,7 +14,7 @@ type server struct {
 	address        string
 	network        string
 	newListener    func(context.Context, string, string) (net.Listener, error)
-	newConnection  func(net.Conn)
+	newConnection  chan net.Conn
 	maxConnections int
 	delay          time.Duration
 	waiter         sync.WaitGroup
@@ -24,7 +24,7 @@ type server struct {
 	logger         Logger
 }
 
-func New(options ...option) ListenCloser {
+func New(options ...option) Server {
 	config := newConfig(options)
 
 	child, shutdown := context.WithCancel(config.Context)
@@ -34,7 +34,7 @@ func New(options ...option) ListenCloser {
 		address:        config.Address,
 		network:        config.Network,
 		newListener:    config.NewListener,
-		newConnection:  config.NewConnection,
+		newConnection:  make(chan net.Conn, config.BufferSize),
 		maxConnections: config.MaxConnections,
 		delay:          config.ShutdownDelay,
 		waiter:         sync.WaitGroup{},
@@ -47,6 +47,7 @@ func New(options ...option) ListenCloser {
 
 func (this *server) Listen() {
 	defer this.awaitCleanShutdown()
+	defer this.closeActive()
 
 	if listener, err := this.newListener(this.ctx, this.network, this.address); err == nil {
 		this.logger.Printf("[INFO] Listening for [%s] traffic on [%s]...", this.network, this.address)
@@ -58,8 +59,6 @@ func (this *server) Listen() {
 	} else {
 		this.logger.Printf("[WARN] Unable to initialize listening socket: %s", err)
 	}
-
-	this.closeActive()
 }
 func (this *server) listen(listener net.Listener) {
 	go this.closeListener(listener)
@@ -97,9 +96,7 @@ func (this *server) handleConnection(connection net.Conn) error {
 	this.waiter.Add(1)
 	this.active[connection] = struct{}{}
 
-	managed := newManagedConnection(connection, this.cleanupConnection)
-	go this.newConnection(managed)
-
+	this.newConnection <- newManagedConnection(connection, this.cleanupConnection)
 	return nil
 }
 
@@ -128,8 +125,12 @@ func (this *server) awaitCleanShutdown() {
 	this.waiter.Wait() // ensure any active connections are closed
 }
 func (this *server) closeListener(listener io.Closer) {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+
 	<-this.ctx.Done() // blocks until context is canceled via parent or caller invoking Close() directly
 	_ = listener.Close()
+	close(this.newConnection)
 	this.logger.Printf("[INFO] Listener for [%s] traffic on [%s] closed.", this.network, this.address)
 }
 func (this *server) closeActive() {
@@ -175,6 +176,8 @@ func (this *server) delayClosingActive() {
 	defer cancel()
 	<-ctx.Done()
 }
+
+func (this *server) ConnectionEstablished() <-chan net.Conn { return this.newConnection }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

@@ -6,7 +6,8 @@ import (
 	"net"
 )
 
-type ListenCloser interface {
+type Server interface {
+	ConnectionEstablished() <-chan net.Conn
 	Listen()
 	io.Closer
 }

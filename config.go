@@ -16,7 +16,7 @@ type configuration struct {
 	Network        string
 	Address        string
 	NewListener    func(context.Context, string, string) (net.Listener, error)
-	NewConnection  func(net.Conn)
+	BufferSize     int
 	MaxConnections int
 	ShutdownDelay  time.Duration
 	Monitor        Monitor
@@ -41,20 +41,18 @@ func (singleton) Address(value string) option {
 func (singleton) NewListener(value func(context.Context, string, string) (net.Listener, error)) option {
 	return func(this *configuration) { this.NewListener = value }
 }
-func (singleton) NewConnection(value func(net.Conn)) option {
-	return func(this *configuration) { this.NewConnection = value }
+func (singleton) BufferSize(value uint16) option {
+	return func(this *configuration) { this.BufferSize = int(value) }
 }
 func (singleton) MaxConnections(value uint32) option {
 	return func(this *configuration) { this.MaxConnections = int(value) }
 }
 func (singleton) ShutdownDelay(value time.Duration) option {
-	return func(this *configuration) {
-		if value < 0 {
-			this.ShutdownDelay = 0
-		} else {
-			this.ShutdownDelay = value
-		}
+	if value < 0 {
+		value = 0
 	}
+
+	return func(this *configuration) { this.ShutdownDelay = value }
 }
 func (singleton) Monitor(value Monitor) option {
 	return func(this *configuration) { this.Monitor = value }
@@ -85,7 +83,7 @@ func (singleton) defaults(options ...option) []option {
 		Options.Network("tcp"),
 		Options.Address("127.0.0.1:9999"),
 		Options.NewListener(defaultListenConfig.Listen),
-		Options.NewConnection(func(net.Conn) {}),
+		Options.BufferSize(32),
 		Options.MaxConnections(1024),
 		Options.ShutdownDelay(time.Millisecond * 100),
 		Options.Monitor(noop),
