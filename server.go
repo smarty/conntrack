@@ -11,8 +11,9 @@ import (
 type server struct {
 	ctx            context.Context
 	shutdown       context.CancelFunc
-	address        string
+	name           string
 	network        string
+	address        string
 	newListener    func(context.Context, string, string) (net.Listener, error)
 	newConnection  chan net.Conn
 	maxConnections int
@@ -31,8 +32,9 @@ func New(options ...option) Server {
 	return &server{
 		ctx:            child,
 		shutdown:       shutdown,
-		address:        config.Address,
+		name:           config.Name,
 		network:        config.Network,
+		address:        config.Address,
 		newListener:    config.NewListener,
 		newConnection:  make(chan net.Conn, config.BufferSize),
 		maxConnections: config.MaxConnections,
@@ -50,7 +52,7 @@ func (this *server) Listen() {
 	defer this.closeActive()
 
 	if listener, err := this.newListener(this.ctx, this.network, this.address); err == nil {
-		this.logger.Printf("[INFO] Listening for [%s] traffic on [%s]...", this.network, this.address)
+		this.logger.Printf("[INFO] Listening for [%s] traffic named [%s] on [%s]...", this.network, this.name, this.address)
 		this.listen(listener)
 
 	} else if err == context.Canceled {
@@ -99,7 +101,6 @@ func (this *server) handleConnection(connection net.Conn) error {
 	this.newConnection <- newManagedConnection(connection, this.cleanupConnection)
 	return nil
 }
-
 func (this *server) connectionAllowed(_ net.Conn) error {
 	select {
 	case <-this.ctx.Done():
@@ -131,7 +132,7 @@ func (this *server) closeListener(listener io.Closer) {
 	<-this.ctx.Done() // blocks until context is canceled via parent or caller invoking Close() directly
 	_ = listener.Close()
 	close(this.newConnection)
-	this.logger.Printf("[INFO] Listener for [%s] traffic on [%s] closed.", this.network, this.address)
+	this.logger.Printf("[INFO] Listener for [%s] traffic named [%s] on [%s] closed.", this.network, this.name, this.address)
 }
 func (this *server) closeActive() {
 	this.mutex.Lock()
@@ -165,7 +166,6 @@ func (this *server) cleanupConnection(connection net.Conn) {
 	this.logger.Printf("[DEBUG] Closed with [%s] closed.", connection.RemoteAddr())
 	this.monitor.ConnectionClosed(connection)
 }
-
 func (this *server) delayClosingActive() {
 	if this.delay == 0 {
 		return

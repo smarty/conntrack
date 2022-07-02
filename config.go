@@ -13,6 +13,7 @@ import (
 
 type configuration struct {
 	Context        context.Context
+	Name           string
 	Network        string
 	Address        string
 	NewListener    func(context.Context, string, string) (net.Listener, error)
@@ -31,6 +32,9 @@ func newConfig(options []option) configuration {
 
 func (singleton) Context(value context.Context) option {
 	return func(this *configuration) { this.Context = value }
+}
+func (singleton) Name(value string) option {
+	return func(this *configuration) { this.Name = value }
 }
 func (singleton) Network(value string) option {
 	return func(this *configuration) { this.Network = value }
@@ -80,6 +84,7 @@ func (singleton) defaults(options ...option) []option {
 	noop := &nop{}
 	return append([]option{
 		Options.Context(context.Background()),
+		Options.Name("listener"),
 		Options.Network("tcp"),
 		Options.Address("127.0.0.1:9999"),
 		Options.NewListener(defaultListenConfig.Listen),
