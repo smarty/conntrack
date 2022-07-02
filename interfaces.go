@@ -11,14 +11,9 @@ type ListenCloser interface {
 	io.Closer
 }
 
-type Server interface {
-	ConnectionEstablished() <-chan net.Conn
-	ListenCloser
-}
-
 type Monitor interface {
 	ConnectionEstablished(net.Conn)
-	ConnectionRejected(net.Conn, error)
+	ConnectionRefused(net.Conn, error)
 	ConnectionClosed(net.Conn)
 }
 

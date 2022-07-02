@@ -16,8 +16,7 @@ type configuration struct {
 	Network        string
 	Address        string
 	NewListener    func(context.Context, string, string) (net.Listener, error)
-	NewConnection  chan net.Conn
-	BufferSize     int
+	NewConnection  func(net.Conn)
 	MaxConnections int
 	ShutdownDelay  time.Duration
 	Monitor        Monitor
@@ -42,8 +41,8 @@ func (singleton) Address(value string) option {
 func (singleton) NewListener(value func(context.Context, string, string) (net.Listener, error)) option {
 	return func(this *configuration) { this.NewListener = value }
 }
-func (singleton) BufferSize(value uint16) option {
-	return func(this *configuration) { this.BufferSize = int(value) }
+func (singleton) NewConnection(value func(net.Conn)) option {
+	return func(this *configuration) { this.NewConnection = value }
 }
 func (singleton) MaxConnections(value uint32) option {
 	return func(this *configuration) { this.MaxConnections = int(value) }
@@ -86,7 +85,7 @@ func (singleton) defaults(options ...option) []option {
 		Options.Network("tcp"),
 		Options.Address("127.0.0.1:9999"),
 		Options.NewListener(defaultListenConfig.Listen),
-		Options.BufferSize(32),
+		Options.NewConnection(func(net.Conn) {}),
 		Options.MaxConnections(1024),
 		Options.ShutdownDelay(time.Millisecond * 100),
 		Options.Monitor(noop),
@@ -103,7 +102,7 @@ var Options singleton
 
 type nop struct{}
 
-func (*nop) ConnectionRejected(_ net.Conn, _ error) {}
-func (*nop) ConnectionEstablished(_ net.Conn)       {}
-func (*nop) ConnectionClosed(_ net.Conn)            {}
-func (*nop) Printf(string, ...any)                  {}
+func (*nop) ConnectionRefused(_ net.Conn, _ error) {}
+func (*nop) ConnectionEstablished(_ net.Conn)      {}
+func (*nop) ConnectionClosed(_ net.Conn)           {}
+func (*nop) Printf(string, ...any)                 {}
