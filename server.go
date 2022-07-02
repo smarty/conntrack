@@ -130,14 +130,14 @@ func (this *server) awaitCleanShutdown() {
 	this.waiter.Wait() // ensure any active connections are closed
 }
 func (this *server) closeListener(listener io.Closer) {
+	<-this.ctx.Done() // blocks until context is canceled via parent or caller invoking Close() directly
+
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 
-	<-this.ctx.Done() // blocks until context is canceled via parent or caller invoking Close() directly
 	_ = listener.Close()
-	close(this.newConnection)
-
 	this.logger.Printf("[INFO] Closed listener for [%s] traffic on [%s://%s].", this.name, this.network, this.address)
+	close(this.newConnection)
 }
 func (this *server) closeActiveConnections() {
 	this.mutex.Lock()
@@ -176,7 +176,7 @@ func (this *server) delayClosingActive() {
 		return
 	}
 
-	this.logger.Printf("[INFO] Waiting for [%s] before shutting down %d active connections for [%s].", len(this.active), this.delay, this.network)
+	this.logger.Printf("[INFO] Waiting for [%s] before shutting down %d active connection(s) for [%s] at [%s://%s].", this.delay, len(this.active), this.name, this.network, this.address)
 	ctx, cancel := context.WithTimeout(this.ctx, this.delay)
 	defer cancel()
 	<-ctx.Done()
