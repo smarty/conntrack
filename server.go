@@ -49,9 +49,12 @@ func (this *server) Listen() {
 	defer this.awaitCleanShutdown()
 
 	if listener, err := this.newListener(this.ctx, this.network, this.address); err == nil {
+		this.logger.Printf("[INFO] Listening for [%s] traffic on [%s]...", this.network, this.address)
 		this.listen(listener)
+
 	} else if err == context.Canceled {
 		return
+
 	} else {
 		this.logger.Printf("[WARN] Unable to initialize listening socket: %s", err)
 	}
@@ -60,6 +63,7 @@ func (this *server) Listen() {
 }
 func (this *server) listen(listener net.Listener) {
 	go this.closeListener(listener)
+
 	for this.acceptConnection(listener) {
 	}
 }
@@ -126,6 +130,7 @@ func (this *server) awaitCleanShutdown() {
 func (this *server) closeListener(listener io.Closer) {
 	<-this.ctx.Done() // blocks until context is canceled via parent or caller invoking Close() directly
 	_ = listener.Close()
+	this.logger.Printf("[INFO] Listener for [%s] traffic on [%s] closed.", this.network, this.address)
 }
 func (this *server) closeActive() {
 	this.mutex.Lock()
@@ -142,7 +147,7 @@ func (this *server) closeActive() {
 		_ = connection.Close()
 		this.waiter.Done()
 
-		this.logger.Printf("[DEBUG] Closed with [%s] closed.", connection.RemoteAddr())
+		this.logger.Printf("[DEBUG] Connection with [%s] closed.", connection.RemoteAddr())
 		this.monitor.ConnectionClosed(connection)
 	}
 }
