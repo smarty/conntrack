@@ -52,7 +52,7 @@ func (this *server) Listen() {
 	defer this.closeActiveConnections()
 
 	if listener, err := this.newListener(this.ctx, this.network, this.address); err == nil {
-		this.logger.Printf("[INFO] Listening for [%s] traffic named [%s] on [%s]...", this.network, this.name, this.address)
+		this.logger.Printf("[INFO] Listening for [%s] traffic [%s://%s]...", this.name, this.network, this.address)
 		this.listen(listener)
 
 	} else if err == context.Canceled {
@@ -73,7 +73,6 @@ func (this *server) acceptConnection(listener net.Listener) bool {
 		return false
 
 	} else if err != nil {
-		this.logger.Printf("[WARN] Refused connection for [%s]: %s", this.name, err)
 		this.monitor.ConnectionRefused(connection, err)
 
 	} else if err = this.handleConnection(connection); err != nil {
@@ -81,7 +80,7 @@ func (this *server) acceptConnection(listener net.Listener) bool {
 		this.monitor.ConnectionRefused(connection, ErrShuttingDown)
 
 	} else {
-		this.logger.Printf("[DEBUG] Connection established with [%s] for [%s].", connection.RemoteAddr(), this.name)
+		this.logger.Printf("[DEBUG] Connection established with [%s://%s] for [%s].", this.network, connection.RemoteAddr(), this.name)
 		this.monitor.ConnectionEstablished(connection)
 	}
 
@@ -138,7 +137,7 @@ func (this *server) closeListener(listener io.Closer) {
 	_ = listener.Close()
 	close(this.newConnection)
 
-	this.logger.Printf("[INFO] Closed listener for [%s] traffic named [%s] on [%s].", this.network, this.name, this.address)
+	this.logger.Printf("[INFO] Closed listener for [%s] traffic on [%s://%s].", this.name, this.network, this.address)
 }
 func (this *server) closeActiveConnections() {
 	this.mutex.Lock()
@@ -167,7 +166,7 @@ func (this *server) protectedCloseConnection(connection net.Conn) error {
 func (this *server) closeConnection(connection net.Conn) error {
 	delete(this.active, connection)
 	err := connection.Close()
-	this.logger.Printf("[DEBUG] Connection closed with [%s] for [%s].", connection.RemoteAddr(), this.name)
+	this.logger.Printf("[DEBUG] Connection closed for [%s] with [%s://%s].", this.name, this.network, connection.RemoteAddr())
 	this.monitor.ConnectionClosed(connection)
 	this.waiter.Done()
 	return err
@@ -177,7 +176,7 @@ func (this *server) delayClosingActive() {
 		return
 	}
 
-	this.logger.Printf("[INFO] Waiting for [%s] before shutting down %d active connections.", len(this.active), this.delay)
+	this.logger.Printf("[INFO] Waiting for [%s] before shutting down %d active connections for [%s].", len(this.active), this.delay, this.network)
 	ctx, cancel := context.WithTimeout(this.ctx, this.delay)
 	defer cancel()
 	<-ctx.Done()
