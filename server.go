@@ -49,7 +49,7 @@ func New(options ...option) Server {
 
 func (this *server) Listen() {
 	defer this.awaitCleanShutdown()
-	defer this.closeActive()
+	defer this.closeActiveConnections()
 
 	if listener, err := this.newListener(this.ctx, this.network, this.address); err == nil {
 		this.logger.Printf("[INFO] Listening for [%s] traffic named [%s] on [%s]...", this.network, this.name, this.address)
@@ -59,13 +59,13 @@ func (this *server) Listen() {
 		return
 
 	} else {
-		this.logger.Printf("[WARN] Unable to initialize listening socket: %s", err)
+		this.logger.Printf("[WARN] Unable to initialize listening socket for [%s] at [%s://%s]: %s", this.name, this.network, this.address, err)
 	}
 }
 func (this *server) listen(listener net.Listener) {
 	go this.closeListener(listener)
 
-	for this.acceptConnection(listener) {
+	for this.isAlive() && this.acceptConnection(listener) {
 	}
 }
 func (this *server) acceptConnection(listener net.Listener) bool {
@@ -73,7 +73,7 @@ func (this *server) acceptConnection(listener net.Listener) bool {
 		return false
 
 	} else if err != nil {
-		this.logger.Printf("[WARN] Unable to accept connection: %s", err)
+		this.logger.Printf("[WARN] Refused connection for [%s]: %s", this.name, err)
 		this.monitor.ConnectionRefused(connection, err)
 
 	} else if err = this.handleConnection(connection); err != nil {
@@ -81,7 +81,7 @@ func (this *server) acceptConnection(listener net.Listener) bool {
 		this.monitor.ConnectionRefused(connection, ErrShuttingDown)
 
 	} else {
-		this.logger.Printf("[DEBUG] Connection with [%s] established.", connection.RemoteAddr())
+		this.logger.Printf("[DEBUG] Connection established with [%s] for [%s].", connection.RemoteAddr(), this.name)
 		this.monitor.ConnectionEstablished(connection)
 	}
 
@@ -98,15 +98,12 @@ func (this *server) handleConnection(connection net.Conn) error {
 	this.waiter.Add(1)
 	this.active[connection] = struct{}{}
 
-	this.newConnection <- newManagedConnection(connection, this.cleanupConnection)
+	this.newConnection <- newManagedConnection(connection, this.protectedCloseConnection)
 	return nil
 }
 func (this *server) connectionAllowed(_ net.Conn) error {
-	select {
-	case <-this.ctx.Done():
+	if !this.isAlive() {
 		return ErrShuttingDown
-	default:
-		// running
 	}
 
 	if len(this.active) >= this.maxConnections {
@@ -115,6 +112,14 @@ func (this *server) connectionAllowed(_ net.Conn) error {
 
 	// FUTURE: allowed list of source IPs or subnets
 	return nil
+}
+func (this *server) isAlive() bool {
+	select {
+	case <-this.ctx.Done():
+		return false
+	default:
+		return true
+	}
 }
 
 func (this *server) Close() error {
@@ -132,9 +137,10 @@ func (this *server) closeListener(listener io.Closer) {
 	<-this.ctx.Done() // blocks until context is canceled via parent or caller invoking Close() directly
 	_ = listener.Close()
 	close(this.newConnection)
-	this.logger.Printf("[INFO] Listener for [%s] traffic named [%s] on [%s] closed.", this.network, this.name, this.address)
+
+	this.logger.Printf("[INFO] Closed listener for [%s] traffic named [%s] on [%s].", this.network, this.name, this.address)
 }
-func (this *server) closeActive() {
+func (this *server) closeActiveConnections() {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 
@@ -145,26 +151,26 @@ func (this *server) closeActive() {
 	this.delayClosingActive()
 
 	for connection := range this.active {
-		delete(this.active, connection)
-		_ = connection.Close()
-		this.waiter.Done()
-
-		this.logger.Printf("[DEBUG] Connection with [%s] closed.", connection.RemoteAddr())
-		this.monitor.ConnectionClosed(connection)
+		_ = this.closeConnection(connection)
 	}
 }
-func (this *server) cleanupConnection(connection net.Conn) {
+func (this *server) protectedCloseConnection(connection net.Conn) error {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 
-	if _, found := this.active[connection]; !found {
-		return // connection closed previously: via connection.Close() *or* the server has already been shut down.
+	if _, found := this.active[connection]; found {
+		return this.closeConnection(connection)
 	}
 
-	defer this.waiter.Done()
+	return nil // connection closed previously: via connection.Close() *or* the server has already been shut down.
+}
+func (this *server) closeConnection(connection net.Conn) error {
 	delete(this.active, connection)
-	this.logger.Printf("[DEBUG] Closed with [%s] closed.", connection.RemoteAddr())
+	err := connection.Close()
+	this.logger.Printf("[DEBUG] Connection closed with [%s] for [%s].", connection.RemoteAddr(), this.name)
 	this.monitor.ConnectionClosed(connection)
+	this.waiter.Done()
+	return err
 }
 func (this *server) delayClosingActive() {
 	if this.delay == 0 {
@@ -183,15 +189,13 @@ func (this *server) ConnectionEstablished() <-chan net.Conn { return this.newCon
 
 type managedConnection struct {
 	net.Conn
-	cleanup func(net.Conn)
+	closer func(net.Conn) error
 }
 
-func newManagedConnection(connection net.Conn, cleanup func(net.Conn)) net.Conn {
-	return &managedConnection{Conn: connection, cleanup: cleanup}
+func newManagedConnection(connection net.Conn, closer func(net.Conn) error) net.Conn {
+	return &managedConnection{Conn: connection, closer: closer}
 }
 
 func (this *managedConnection) Close() error {
-	err := this.Conn.Close()
-	this.cleanup(this)
-	return err
+	return this.closer(this.Conn)
 }
