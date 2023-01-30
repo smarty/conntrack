@@ -2,6 +2,7 @@ package conntrack
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -55,7 +56,7 @@ func (this *server) Listen() {
 		this.logger.Printf("[INFO] Listening for [%s] traffic [%s://%s]...", this.name, this.network, this.address)
 		this.listen(listener)
 
-	} else if err == context.Canceled {
+	} else if errors.Is(err, context.Canceled) {
 		return
 
 	} else {
@@ -69,7 +70,7 @@ func (this *server) listen(listener net.Listener) {
 	}
 }
 func (this *server) acceptConnection(listener net.Listener) bool {
-	if connection, err := listener.Accept(); err == context.Canceled {
+	if connection, err := listener.Accept(); errors.Is(err, context.Canceled) {
 		return false
 
 	} else if err != nil {
